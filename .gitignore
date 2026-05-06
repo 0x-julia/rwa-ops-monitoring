@@ -1,0 +1,50 @@
+# ============================================================
+# SECURITY — Never commit these
+# ============================================================
+
+# Environment variables — contains API keys, tokens, credentials
+.env
+
+# Runtime data — may contain wallet addresses or transaction details
+data/
+logs/
+
+# Generated reports — contain fund data (share sanitised samples only)
+reports/
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# ============================================================
+# macOS
+# ============================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ============================================================
+# Editor
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
