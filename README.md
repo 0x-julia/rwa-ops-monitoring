@@ -1,6 +1,6 @@
 # RWA Protocol Operations — Live Monitoring Systems
 
-Operational monitoring systems built on two live Real World Asset protocols: **Midas Finance** and **Centrifuge**. Both systems run continuously against live on-chain data, tracking investor lifecycle events, NAV movements, SLA compliance, and fund health — and delivering automated reports and real-time alerts to operators.
+Operational monitoring systems built on two live Real World Asset protocols: **Centrifuge** and **Midas**. Both systems run continuously against live on-chain data, tracking investor lifecycle events, NAV movements, SLA compliance, and fund health — and delivering automated reports and real-time alerts to operators.
 
 **Total AUM monitored: ~$1.7B across 7 chains and 4 products.**
 
@@ -8,18 +8,53 @@ Operational monitoring systems built on two live Real World Asset protocols: **M
 
 ## What This Is
 
-These aren't demos or simulations. The scripts in this repo connect to live deployed contracts, pull real on-chain state, and produce outputs that reflect actual fund activity. The sample reports in `/samples` are generated from live data runs, not synthetic inputs.
+The scripts in this repo connect directly to live deployed contracts, pull real onchain state, and generate operational outputs based on actual fund activity. The sample reports in /samples are generated from live production data rather than synthetic inputs.
 
-The work was built to understand how tokenised fund operations actually function at the infrastructure layer — how investor lifecycle events flow through smart contracts, where SLA exposure sits, and what information an operations team needs to run a fund safely day-to-day.
+The systems are designed to replicate the daily operational workflows of an onchain fund operations team — including real-time event monitoring, SLA tracking, and structured reporting outputs ready to forward to fund administrators or strategy managers.
 
 ---
 
 ## Systems Overview
 
-### 1. Midas Daily Ops System
+### 1. Centrifuge JTRSY / JAAA System
+
+**Products:** JTRSY (Janus Henderson Anemoy Treasury Fund) · JAAA (Janus Henderson Anemoy AAA CLO Fund)
+**AUM covered:** ~$1.5B+  
+**Stack:** Python · Centrifuge GraphQL API · Claude API · WeasyPrint · Telegram  
+**Chains:** Ethereum · Arbitrum · Base · BNB · Avalanche · Monad · Pharos
+
+Centrifuge pools use epoch-based settlement rather than continuous approval queues. Investor actions (deposit requests, redemptions) are batched and settled by the protocol at epoch close. JTRSY settles T+1; JAAA settles T+3.
+
+The system runs as four agents across both pools:
+
+| Script | Role |
+|--------|------|
+| `jtrsy_bot.py` | Real-time monitor for the JTRSY pool. Polls the Centrifuge GraphQL API every 60 seconds and fires Telegram alerts for deposit requests, deposit claimable, redeem requests, and redeem claimable events across all supported chains. |
+| `jaaa_bot.py` | Same pattern for the JAAA pool. Independent bot per pool — pool identity injected via environment variable. |
+| `centrifuge_analyst.py` | Daily run across both pools. Queries NAV, AUM, yield, pending orders, epoch state, and 24-hour activity via GraphQL. Handles chain-specific USDC decimal overrides (BNB uses 18 decimals vs. 6 on other chains). Calls Claude API for Flags & Exceptions narrative. Writes structured JSON output. |
+| `centrifuge_reporter.py` | Reads analyst JSON. Produces three PDFs: JTRSY strategy manager report, JAAA strategy manager report, and Operator Digest. Sends Telegram digest to operations channel. |
+
+**What the reports cover:**
+- NAV per token and 24-hour change
+- AUM and total supply across all chains
+- Pending deposit and redemption orders with SLA tracking
+- Epoch state and settlement timeline
+- 24-hour activity summary
+- AI-generated operational narrative for the Flags & Exceptions section
+
+**Infrastructure decisions worth noting:**
+- Single Centrifuge GraphQL endpoint returns activity across all seven chains with per-transaction chain tagging — no per-chain RPC connections required
+- Chain-specific USDC decimal handling: BNB uses 18 decimals vs. 6 on Ethereum/Avalanche/Monad/Pharos — verified against deployed token contracts
+- Sub-minimum redemption filter removes 1-share test records from live data (below the $500K fund minimum) so they don't appear as open requests in reports
+- Two independent bots rather than one multi-pool bot — easier to extend to new Centrifuge pools without touching logic
+- All secrets loaded from `.env` via `python-dotenv` — no credentials in source
+
+---
+
+### 2. Midas Daily Ops System
 
 **Products:** mTBILL (Ethereum + Base) · mF-ONE (Ethereum)  
-**AUM covered:** ~$1.6B  
+**AUM covered:** ~$120M+  
 **Stack:** Python · Alchemy · Etherscan API · Ethplorer · Claude API · WeasyPrint · Telegram
 
 Midas tokenises institutional fixed-income products — mTBILL tracks US Treasury Bills managed by BlackRock; mF-ONE tracks a private credit strategy run by Fasanara Capital. Both operate on a request-approve-execute lifecycle across multiple vaults, with separate issuance and redemption pathways.
@@ -46,41 +81,6 @@ The system runs as three coordinated agents:
 - Public Base RPC used for Base chain events; Alchemy retained for oracle calls and block timestamps only
 - Ethplorer free endpoint used for holder intelligence (Etherscan `tokenholderlist` requires paid plan)
 - Event deduplication guard prevents duplicate alerts when RPC returns repeated log entries
-- All secrets loaded from `.env` via `python-dotenv` — no credentials in source
-
----
-
-### 2. Centrifuge JTRSY / JAAA System
-
-**Products:** JTRSY (Janus Henderson AAA CLO ETF) · JAAA (Janus Henderson AAA CLO ETF — senior tranche)  
-**AUM covered:** ~$100M+  
-**Stack:** Python · Centrifuge GraphQL API · Claude API · WeasyPrint · Telegram  
-**Chains:** Ethereum · Arbitrum · Base · BNB · Avalanche · Monad · Pharos
-
-Centrifuge pools operate differently from Midas vaults — the lifecycle flows through epoch-based settlement rather than continuous approval queues. Investor actions (deposit requests, redemptions) are batched and settled by the protocol at epoch close. JTRSY settles T+1; JAAA settles T+3.
-
-The system runs as four agents across both pools:
-
-| Script | Role |
-|--------|------|
-| `jtrsy_bot.py` | Real-time monitor for the JTRSY pool. Polls the Centrifuge GraphQL API every 60 seconds and fires Telegram alerts for deposit requests, deposit claimable, redeem requests, and redeem claimable events across all supported chains. |
-| `jaaa_bot.py` | Same pattern for the JAAA pool. Independent bot per pool — pool identity injected via environment variable. |
-| `centrifuge_analyst.py` | Daily run across both pools. Queries NAV, AUM, yield, pending orders, epoch state, and 24-hour activity via GraphQL. Handles chain-specific USDC decimal overrides (BNB uses 18 decimals vs. 6 on other chains). Calls Claude API for Flags & Exceptions narrative. Writes structured JSON output. |
-| `centrifuge_reporter.py` | Reads analyst JSON. Produces three PDFs: JTRSY strategy manager report, JAAA strategy manager report, and Operator Digest. Sends Telegram digest to operations channel. |
-
-**What the reports cover:**
-- NAV per token and 24-hour change
-- AUM and total supply across all chains
-- Pending deposit and redemption orders with SLA tracking
-- Epoch state and settlement timeline
-- 24-hour activity summary
-- AI-generated operational narrative for the Flags & Exceptions section
-
-**Infrastructure decisions worth noting:**
-- Single Centrifuge GraphQL endpoint returns activity across all seven chains with per-transaction chain tagging — no per-chain RPC connections required
-- Chain-specific USDC decimal handling: BNB uses 18 decimals vs. 6 on Ethereum/Avalanche/Monad/Pharos — verified against deployed token contracts
-- Sub-minimum redemption filter removes 1-share test records from live data (below the $500K fund minimum) so they don't appear as open requests in reports
-- Two independent bots rather than one multi-pool bot — easier to extend to new Centrifuge pools without touching logic
 - All secrets loaded from `.env` via `python-dotenv` — no credentials in source
 
 ---
